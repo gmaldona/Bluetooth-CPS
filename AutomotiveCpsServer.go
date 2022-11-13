@@ -1,7 +1,5 @@
 package main
 
-//package automotivecps
-
 import (
 	"encoding/hex"
 	"fmt"
@@ -109,7 +107,7 @@ func handleRequest(conn net.Conn) {
 			// parsing msg so the payload can go to the vehicle - payload is at index [1]
 			re, _ := regexp.Compile(";")
 			split := re.Split(string(buf), -1)
-			set := []string{}
+			var set []string
 
 			for i := range split {
 				set = append(set, strings.Replace(split[i], "\n", "", -1))
@@ -141,8 +139,8 @@ func handleRequest(conn net.Conn) {
 
 			// CONNECT request from java
 			case strings.Contains(string(buf), "CONNECT"):
-				// for each discovered device try to connect to the device
 
+				// ignore 0x0 fillers
 				bytes := []byte(set[1])
 				var payload []byte
 				for _, b := range bytes {
@@ -153,11 +151,13 @@ func handleRequest(conn net.Conn) {
 
 				device, _ := server.DiscoveredDevices.Get(string(payload))
 
+				// connect to device
 				connectedDevice, err := Adapter.Connect(device.Addresser, bluetooth.ConnectionParams{})
 				if err != nil {
 					log.Fatalln(err.Error())
 				}
 
+				// add device to concurrent map of devices
 				server.ConnectedDevices.Set(device.Address, connectedDevice)
 				fmt.Println("Connected to", device.Address)
 
@@ -167,6 +167,7 @@ func handleRequest(conn net.Conn) {
 					return
 				}
 
+				// Getting the writers and readers services
 				service := services[0]
 				characteristics, _ := service.DiscoverCharacteristics([]bluetooth.UUID{ANKI_STR_CHR_READ_UUID, ANKI_STR_CHR_WRITE_UUID})
 				server.DeviceCharacteristics.Set(device.Address, characteristics)
@@ -174,15 +175,13 @@ func handleRequest(conn net.Conn) {
 				readService := characteristics[1]
 
 				// Each time the vehicle sends a msg through bluetooth, the event is triggered
-				err = readService.EnableNotifications(func(value []byte) {
+				readService.EnableNotifications(func(value []byte) {
 					encodedBytes := hex.EncodeToString(value)
 					// Send the vehicle respond back to java
 					conn.Write([]byte(device.Address + ";" + encodedBytes + "\n"))
 					fmt.Println("RECEIVED: [" + device.Address + ";" + encodedBytes + "]")
 				})
-				if err != nil {
-					return
-				}
+
 				// terminate connection request to java
 				conn.Write([]byte("CONNECT;SUCCESS\n"))
 				fmt.Println("CONNECT COMPLETED")
@@ -198,8 +197,6 @@ func handleRequest(conn net.Conn) {
 			outlined in https://github.com/tenbergen/anki-drive-java/blob/master/Anki%20Drive%20Programming%20Guide.pdf
 			*/
 			default:
-				if len(msg) != 6 {
-				}
 				if len(set) == 2 {
 					// Get the writer characteristic
 					characteristics, _ := server.DeviceCharacteristics.Get(address)
@@ -208,6 +205,7 @@ func handleRequest(conn net.Conn) {
 
 					payload, _ := hex.DecodeString(msg)
 
+					// write payload to anki vehicle
 					_, err := writeService.WriteWithoutResponse(payload)
 					if err != nil {
 						fmt.Println(err)
@@ -216,7 +214,6 @@ func handleRequest(conn net.Conn) {
 
 					fmt.Println("SENDING: [" + strings.Replace(string(buf), "\n", "", -1) + "]")
 				}
-
 			}
 		}(buf)
 	}
@@ -227,10 +224,12 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 	m := cmap.New[AnkiVehicle]()
 
 	channel := make(chan string, 1)
+	// func that is wrapped so it can timeout in some number of seconds
 	go func() {
 		must("enable BLE stack", Adapter.Enable())
 
 		err := Adapter.Scan(func(adapter *bluetooth.Adapter, device bluetooth.ScanResult) {
+			// only scan for devices that contain "Drive" for anki drive
 			if strings.Contains(device.LocalName(), "Drive") {
 				if !m.Has(device.Address.String()) {
 					var manufacturerData = ""
@@ -239,10 +238,11 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 					}
 					var localname = ""
 					if device.Address.String()[0:1] == "e" {
-						localname = "10603001202020204472697665"
+						localname = "\u0001`0\u0001    Drive\u0000"
 					} else {
-						localname = "10603001202020204472697665"
+						localname = "\u0010`0\u0001    Drive\u0000"
 					}
+					// device properties
 					m.Set(strings.Replace(device.Address.String(), "-", "", -1), AnkiVehicle{
 						Address:          strings.Replace(device.Address.String(), "-", "", -1),
 						ManufacturerData: manufacturerData,
@@ -258,6 +258,7 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 		channel <- "finished scanning"
 	}()
 
+	// timeout scan
 	select {
 	case <-channel:
 		break
