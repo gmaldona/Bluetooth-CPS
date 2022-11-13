@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	cmap "github.com/orcaman/concurrent-map/v2"
+	"gopkg.in/yaml.v3"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -42,13 +44,30 @@ type AnkiVehicle struct {
 	Addresser        bluetooth.Addresser
 }
 
+type ServerConf struct {
+	Host string `yaml:"host"`
+	Port string `yaml:"port"`
+}
+
 func main() {
+
+	file, err := ioutil.ReadFile("serverconf.yml")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	serverConf := ServerConf{}
+	err = yaml.Unmarshal(file, &serverConf)
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
+
 	server.DiscoveredDevices = cmap.New[AnkiVehicle]()
 	server.ConnectedDevices = cmap.New[*bluetooth.Device]()
 	server.DeviceCharacteristics = cmap.New[[]bluetooth.DeviceCharacteristic]()
 
 	// Listen for connections on host and port
-	l, err := net.Listen(CONN_TYPE, CONN_HOST+":"+CONN_PORT)
+	l, err := net.Listen(CONN_TYPE, serverConf.Host+":"+serverConf.Port)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -59,8 +78,7 @@ func main() {
 		if err != nil {
 		}
 	}(l)
-
-	fmt.Println("Listening on " + CONN_HOST + ":" + CONN_PORT)
+	fmt.Println("Starting Server...\nListening on " + CONN_HOST + ":" + CONN_PORT)
 	for {
 		// Listen for an incoming connection.
 		conn, err := l.Accept()
