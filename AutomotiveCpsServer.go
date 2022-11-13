@@ -1,6 +1,19 @@
 package main
 
+/* A tcp client that acts as a middle man between ANKI Drive vehicles and the ANKI Drive SDK for Java.
+ * Forms a tcp/ip connection to the SDK and uses tinygo BLE module for connecting to each ANKI Drive vehicle.
+ * ANKI Drive vehicle firmware and message protocol can be found here:
+ *		https://github.com/tenbergen/anki-drive-java/blob/master/Anki%20Drive%20Programming%20Guide.pdf
+ *
+ * Date:    November 13, 2022
+ * Author:  Bastian Tenbergen & Gregory Maldonado
+ * Version: 1.0
+
+ * State University of New York College at Oswego
+ */
+
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -13,12 +26,6 @@ import (
 	"strings"
 	"time"
 	"tinygo.org/x/bluetooth"
-)
-
-const (
-	CONN_HOST = "127.0.0.1"
-	CONN_PORT = "5000"
-	CONN_TYPE = "tcp"
 )
 
 var (
@@ -65,7 +72,7 @@ func main() {
 	server.DeviceCharacteristics = cmap.New[[]bluetooth.DeviceCharacteristic]()
 
 	// Listen for connections on host and port
-	l, err := net.Listen(CONN_TYPE, serverConf.Host+":"+serverConf.Port)
+	l, err := net.Listen("tcp", serverConf.Host+":"+serverConf.Port)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -76,7 +83,7 @@ func main() {
 		if err != nil {
 		}
 	}(l)
-	fmt.Println("Starting Server...\nListening on " + CONN_HOST + ":" + CONN_PORT)
+	fmt.Println("Starting Server...\nListening on " + serverConf.Host + ":" + serverConf.Port)
 	for {
 		// Listen for an incoming connection.
 		conn, err := l.Accept()
@@ -120,6 +127,7 @@ func handleRequest(conn net.Conn) {
 				msg = set[1]
 			}
 
+			// Perform different actions based on the tcp msg recieved from ANKI SDK
 			switch {
 			// SCAN request from java
 			case strings.Contains(string(buf), "SCAN"):
@@ -139,15 +147,16 @@ func handleRequest(conn net.Conn) {
 
 			// CONNECT request from java
 			case strings.Contains(string(buf), "CONNECT"):
-
 				// ignore 0x0 fillers
-				bytes := []byte(set[1])
-				var payload []byte
-				for _, b := range bytes {
-					if b != 0x00 {
-						payload = append(payload, b)
-					}
-				}
+				payload := bytes.Trim([]byte(set[1]), "\x00")
+
+				//bytes := []byte(set[1])
+				//var payload []byte
+				//for _, b := range bytes {
+				//	if b != 0x00 {
+				//		payload = append(payload, b)
+				//	}
+				//}
 
 				device, _ := server.DiscoveredDevices.Get(string(payload))
 
@@ -200,9 +209,7 @@ func handleRequest(conn net.Conn) {
 				if len(set) == 2 {
 					// Get the writer characteristic
 					characteristics, _ := server.DeviceCharacteristics.Get(address)
-
 					writeService := characteristics[0]
-
 					payload, _ := hex.DecodeString(msg)
 
 					// write payload to anki vehicle
@@ -224,7 +231,7 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 	m := cmap.New[AnkiVehicle]()
 
 	channel := make(chan string, 1)
-	// func that is wrapped so it can timeout in some number of seconds
+	// func that is wrapped, so it can time out in some number of seconds
 	go func() {
 		must("enable BLE stack", Adapter.Enable())
 
@@ -242,7 +249,7 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 					} else {
 						localname = "\u0010`0\u0001    Drive\u0000"
 					}
-					// device properties
+					// ANKI device properties
 					m.Set(strings.Replace(device.Address.String(), "-", "", -1), AnkiVehicle{
 						Address:          strings.Replace(device.Address.String(), "-", "", -1),
 						ManufacturerData: manufacturerData,
