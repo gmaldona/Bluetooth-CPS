@@ -127,6 +127,8 @@ func handleRequest(conn net.Conn) {
 				msg = set[1]
 			}
 
+			fmt.Println("BUFF: ", string(buf))
+
 			// Perform different actions based on the tcp msg recieved from ANKI SDK
 			switch {
 			// SCAN request from java
@@ -144,19 +146,25 @@ func handleRequest(conn net.Conn) {
 				// Stops scanning on java side
 				conn.Write([]byte("SCAN;COMPLETED\n"))
 				fmt.Println("Scanning Completed.")
+				return
+
+			//DISCONNECT request from java
+			case strings.Contains(string(buf), "DISCONNECT"):
+
+				// disconnect the vehicle with the address in the buffer
+				address := string(bytes.Trim([]byte(set[1]), "\x00"))
+				connectedDevice, ok := server.ConnectedDevices.Get(address)
+				if !ok {
+					log.Fatalln("Address: " + address)
+				}
+				connectedDevice.Disconnect()
+				conn.Write([]byte("DISCONNECT;SUCCESS\n"))
+				fmt.Println(address + " Disconnected.")
 
 			// CONNECT request from java
-			case strings.Contains(string(buf), "CONNECT"):
+			case strings.Contains(set[0], "CONNECT"):
 				// ignore 0x0 fillers
 				payload := bytes.Trim([]byte(set[1]), "\x00")
-
-				//bytes := []byte(set[1])
-				//var payload []byte
-				//for _, b := range bytes {
-				//	if b != 0x00 {
-				//		payload = append(payload, b)
-				//	}
-				//}
 
 				device, _ := server.DiscoveredDevices.Get(string(payload))
 
@@ -194,13 +202,7 @@ func handleRequest(conn net.Conn) {
 				// terminate connection request to java
 				conn.Write([]byte("CONNECT;SUCCESS\n"))
 				fmt.Println("CONNECT COMPLETED")
-
-			//DISCONNECT request from java
-			case strings.Contains(string(buf), "DISCONNECT"):
-				// disconnect the vehicle with the address in the buffer
-				connectedDevice, _ := server.ConnectedDevices.Get(address)
-				connectedDevice.Disconnect()
-				conn.Write([]byte("DISCONNECT;SUCCESS\n"))
+				return
 
 			/* Any other request is assumed to be a command given to the car. Each byte in the buffer represents an action that is
 			outlined in https://github.com/tenbergen/anki-drive-java/blob/master/Anki%20Drive%20Programming%20Guide.pdf
@@ -243,12 +245,7 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 					for _, data := range device.ManufacturerData() {
 						manufacturerData = "beef" + hex.EncodeToString(data)
 					}
-					var localname = ""
-					if device.Address.String()[0:1] == "e" {
-						localname = "\u0001`0\u0001    Drive\u0000"
-					} else {
-						localname = "\u0010`0\u0001    Drive\u0000"
-					}
+					var localname = "10603001202020204472697665"
 					// ANKI device properties
 					m.Set(strings.Replace(device.Address.String(), "-", "", -1), AnkiVehicle{
 						Address:          strings.Replace(device.Address.String(), "-", "", -1),
