@@ -239,7 +239,7 @@ func handleRequest(conn net.Conn) {
 
 // function for scanning nearby vehicles returns a map of addresses to vehicles
 func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
-	m := cmap.New[AnkiVehicle]()
+	devicesFound := cmap.New[AnkiVehicle]()
 
 	channel := make(chan string, 1)
 	// func that is wrapped, so it can time out in some number of seconds
@@ -253,14 +253,14 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 		err := Adapter.Scan(func(adapter *bluetooth.Adapter, device bluetooth.ScanResult) {
 			// only scan for devices that contain "Drive" for anki drive
 			if strings.Contains(device.LocalName(), "Drive") {
-				if !m.Has(device.Address.String()) {
+				if !devicesFound.Has(device.Address.String()) {
 					var manufacturerData = ""
 					for _, data := range device.ManufacturerData() {
 						manufacturerData = "beef" + hex.EncodeToString(data)
 					}
 					var localname = "10603001202020204472697665"
 					// ANKI device properties
-					m.Set(strings.Replace(device.Address.String(), "-", "", -1), AnkiVehicle{
+					devicesFound.Set(strings.Replace(device.Address.String(), "-", "", -1), AnkiVehicle{
 						Address:          strings.Replace(device.Address.String(), "-", "", -1),
 						ManufacturerData: manufacturerData,
 						LocalName:        localname,
@@ -286,7 +286,7 @@ func scan() cmap.ConcurrentMap[string, AnkiVehicle] {
 		break
 	}
 
-	return m
+	return devicesFound
 }
 
 func must(action string, err error) {
